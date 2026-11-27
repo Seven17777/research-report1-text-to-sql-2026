@@ -131,3 +131,42 @@ first arXiv release dates for preprints. It labels publication status and treats
 preprints as provisional evidence, especially the November counterfactual study.
 
 不声称十篇都经过同行评审，也不把2026修订日期当作首次发表日期。
+
+## 关于选题、投入成本和研究设计
+
+**为什么选这个题，为什么有意思？**
+
+It connects AI with data engineering. The interesting problem is that an executable
+query can return a plausible but incorrect answer, and even match a reference result
+by accident on one database. I want to understand which feedback improves meaning,
+not just whether the query runs.
+
+它直接联系AI与数据工程。最有意思的是“能执行”和“语义正确”之间的差距。
+
+**怎样判断投入成本合理？**
+
+Compare reliability at the same cost, or cost at the same reliability. Count training
+compute, teacher calls, generated tokens, database calls and latency. A higher score
+with many more candidates does not by itself establish good value. This report
+proposes that evaluation; it does not claim a measured financial return.
+
+同成本更准确，或同准确率更省成本。没有实际项目预算时，不编造资金回报。
+
+**参数怎么选？**
+
+Model size and hyperparameters are different. Start with 3B and 7B policies under the
+30B limit. Choose learning rate, temperature, candidate count and turn limit on a
+validation set, then freeze them for the test set. The model weights themselves are
+learned during training rather than selected one by one.
+
+30B是上限，不是必须达到的规模。候选数和轮次同时改变效果与成本。
+
+**这些与本报告的设计有什么联系？**
+
+Section 10 holds the backbone, prompts, databases and resource budget fixed. It
+compares one-shot generation, error-only repair, result-aware repair, voting and
+counterexample verification. This separates the value of informative feedback from
+the value of simply making more attempts.
+
+第10节就是围绕“反馈是否值得其成本”设计控制实验；第8节SQLite例子实际运行过，
+十个大模型训练流程没有复现。
