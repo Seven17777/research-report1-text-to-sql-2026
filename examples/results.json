@@ -1,0 +1,21 @@
+[
+  {
+    "scores": [
+      60,
+      90
+    ],
+    "reference": 1,
+    "wrong": 1,
+    "agreement": true
+  },
+  {
+    "scores": [
+      60,
+      80,
+      90
+    ],
+    "reference": 2,
+    "wrong": 1,
+    "agreement": false
+  }
+]

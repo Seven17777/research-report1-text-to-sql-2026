@@ -1,0 +1,48 @@
+name: Compile research report with LaTeX
+
+on:
+  push:
+    branches: [main]
+    tags: ['report-*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify the SQLite counterexample
+        run: python examples/execution_counterexample.py
+      - name: Install Tectonic 0.17.0
+        run: |
+          curl -fsSL https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%400.17.0/tectonic-0.17.0-x86_64-unknown-linux-gnu.tar.gz -o /tmp/tectonic.tar.gz
+          mkdir -p /tmp/tectonic
+          tar -xzf /tmp/tectonic.tar.gz -C /tmp/tectonic
+          /tmp/tectonic/tectonic --version
+      - name: Compile LaTeX and name the submission
+        run: |
+          mkdir -p build
+          /tmp/tectonic/tectonic --untrusted --keep-logs --outdir build main.tex
+          cp build/main.pdf build/26723820-YaoQiqi.pdf
+          sha256sum build/26723820-YaoQiqi.pdf > build/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-report-26723820
+          path: |
+            build/26723820-YaoQiqi.pdf
+            build/main.log
+            build/SHA256SUMS.txt
+            examples/results.json
+          if-no-files-found: error
+      - name: Publish tagged PDF release
+        if: startsWith(github.ref, 'refs/tags/report-')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" build/26723820-YaoQiqi.pdf build/SHA256SUMS.txt --title "Research Report 1 — Yao Qiqi" --notes "English literature survey. PDF compiled from LaTeX by this GitHub Actions run. Includes ten 2026 studies and protocol-aware critical analysis."

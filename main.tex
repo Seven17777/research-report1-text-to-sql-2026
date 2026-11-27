@@ -1,0 +1,333 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=22mm,headheight=15pt]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern,microtype,amsmath,amssymb,booktabs,tabularx,array}
+\usepackage{xcolor,enumitem,fancyhdr,listings}
+\usepackage[hidelinks]{hyperref}
+\definecolor{navy}{HTML}{153E5C}
+\definecolor{pale}{HTML}{F1F5F8}
+\hypersetup{pdftitle={Execution Feedback for Reliable Text-to-SQL with Models up to 30B},pdfauthor={Yao Qiqi}}
+\pagestyle{fancy}\fancyhf{}
+\fancyhead[L]{\small Research Report 1 / Text-to-SQL}
+\fancyhead[R]{\small Yao Qiqi / 26723820}
+\fancyfoot[C]{\small\thepage}
+\setlength{\parindent}{0pt}\setlength{\parskip}{5pt}
+\setlength{\emergencystretch}{2em}
+\renewcommand{\arraystretch}{1.22}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\setlist{nosep,leftmargin=1.4em}
+\lstset{basicstyle=\small\ttfamily,breaklines=true,frame=single,backgroundcolor=\color{pale},columns=fullflexible}
+\newcommand{\paper}[1]{\textcolor{navy}{\textbf{#1}}}
+\begin{document}
+\begin{center}
+{\small DATA ENGINEERING / LITERATURE SURVEY}\par\vspace{8pt}
+{\LARGE\bfseries\color{navy} Execution Feedback for Reliable\\[4pt] Text-to-SQL with Models up to 30B}\par\vspace{7pt}
+{\large Error Correction, Interactive Reasoning, and Reward Design}\par\vspace{12pt}
+\textbf{Yao Qiqi}\quad Student ID: 26723820\par
+Research Report 1 \quad November 27, 2026
+\end{center}
+\vspace{5pt}
+\begin{abstract}
+Executing a generated SQL query provides useful feedback, but successful execution does not establish that the query answers the user's question. This survey examines ten 2026 publications on execution-feedback correction and learning for Text-to-SQL, emphasizing policy models with at most 30 billion parameters. It organizes the evidence around interaction, credit assignment, and verification rather than a single accuracy ranking. Multi-turn reasoning can recover errors, while clause-, step-, and token-level rewards can make training signals more specific. However, their benefits depend on candidate budgets, access to reference answers, and the reliability of execution-based rewards. The strongest deployment claim requires a feedback signal available without a gold query and an evaluation that exposes semantically wrong yet executable SQL. The report compares matched ablations, identifies limitations of headline results, supplies a small executable counterexample, and proposes a budget-controlled evaluation protocol. It is a critical literature survey, not a reproduction of the ten model-training experiments.
+\end{abstract}
+\textbf{Keywords:} Text-to-SQL; execution feedback; reinforcement learning; small language models; reward reliability.
+
+\section{Research question and motivation}
+Natural-language access to databases is useful only when the generated query preserves the intended population, aggregation, join relationships, and output structure. A query can be syntactically valid and return a plausible number while counting orders instead of customers or excluding a boundary date. The executor observes a program's behavior; it does not directly observe the user's intention.
+
+The central question is: \textbf{Under a practical model-size and computation budget, when does execution feedback improve semantic correctness rather than merely executability or reward?} Three subsidiary questions guide the review: what information reaches the model, where a training update assigns credit, and how a final candidate is verified.
+
+The survey covers inference-time correction and training methods designed to improve correction or execution-grounded reasoning. It excludes generic SQL generation advances without a central feedback or verification mechanism. Policy size is separated from teacher size, auxiliary models, sampling cost, and hardware. A 3B student distilled from a large teacher is an eligible small policy, but its entire training pipeline is not a 3B-only system.
+
+\clearpage
+\section{What execution feedback can and cannot prove}
+\subsection{Problem formulation}
+Let $q$ denote a question, $S$ a database schema, $D$ a database instance, and $y$ a generated SQL query. The executor returns either an error or a result, written $E_D(y)$. For a reference query $y^*$, instance-level execution agreement is
+\begin{equation}
+V_D(y)=\mathbf{1}[\,y\text{ executes successfully}\,],\qquad
+A_D(y)=\mathbf{1}[\,E_D(y)\equiv E_D(y^*)\,].
+\end{equation}
+The comparator $\equiv$ must define treatment of order, duplicates, column structure, numeric tolerance, and NULL values. Two papers using the label ``execution accuracy'' can still differ in comparator implementation. Validity $V_D$ is weaker than agreement $A_D$, and agreement on one instance is weaker than semantic equivalence over all valid instances.
+
+A correction policy observes a history $h_t=(q,S,y_0,o_0,\ldots,y_{t-1},o_{t-1})$ and proposes $y_t$, where $o_t$ is execution feedback. Three feedback levels should be distinguished:
+\begin{enumerate}
+\item \textbf{Operational feedback:} parser/runtime errors, returned rows, and resource use. These can normally be obtained at deployment.
+\item \textbf{Reference-dependent feedback:} whether a result matches the gold answer, which clause differs from a gold query, or a reference-derived progress score. These are normally training or evaluation signals.
+\item \textbf{Constructed verification:} tests on additional databases or agreement with a separately generated program. These require an additional oracle and assumptions about its reliability.
+\end{enumerate}
+Treating the second level as a deployment capability would overstate what an autonomous system can do. A model can learn from privileged feedback during training without receiving it at test time, but the transfer must be measured.
+
+\subsection{Correction, regression, and net improvement}
+Let $a_0$ be initial accuracy, $f$ the probability of fixing an initially wrong prediction, and $r$ the probability of corrupting an initially correct one. For a fixed population,
+\begin{equation}
+\Delta a=(1-a_0)f-a_0r.
+\end{equation}
+For example, with $a_0=0.70$, $f=0.20$, and $r=0.10$, correction loses one percentage point overall: $0.30(0.20)-0.70(0.10)=-0.01$. This illustrative calculation explains why more revisions do not guarantee higher accuracy. Reporting only the fraction of errors repaired hides regressions.
+
+\subsection{Accuracy under a search budget}
+Greedy accuracy evaluates one generation. Voting selects an execution-result group among sampled candidates. Pass@$K$ is an oracle upper bound: it asks whether any of $K$ candidates is correct. A practical selector must choose without knowing the answer. Search breadth, number of interaction turns, and total tokens are distinct budgets. A large Pass@$K$ does not by itself demonstrate that the system can identify the successful candidate.
+
+\clearpage
+\section{Review method and evidence boundaries}
+\subsection{Selection and date policy}
+The search covered ACL Anthology, arXiv, and linked author repositories, using combinations of Text-to-SQL, execution feedback, correction, multi-turn reinforcement learning, clause reward, and counterfactual execution. The evidence cutoff is November 27, 2026. Full PDFs were consulted for models, decoding settings, tables, and limitations. The selection is purposive and technically focused; it is not an exhaustive systematic review or a statistical meta-analysis.
+
+For conference papers, eligibility uses the \textbf{formal 2026 publication date after January 31}; an earlier preprint, if any, does not become a new first release. For preprints, the first arXiv submission must be after January 31, 2026. This distinction matters when interpreting the assignment's publication window. The source ledger identifies the date basis rather than treating an updated preprint as a newly published work.
+
+\begin{table}[h]
+\centering\small
+\begin{tabularx}{\textwidth}{@{}p{23mm}p{26mm}p{23mm}Y@{}}
+\toprule
+Study & Evidence / date & Eligible policy & Central feedback mechanism\\
+\midrule
+ReEx-SQL \cite{reex} & ACL / July 2026 & 7B & Execution inside reasoning\\
+SQL-Trail \cite{trail} & ACL / July 2026 & 3B, 7B, 14B & Multi-turn RL; adaptive budget\\
+ReSQL \cite{resql} & Findings ACL / July & 1B--9B variants & Error-reasoning training and retrieval\\
+EXPO-SQL \cite{expo} & Findings ACL / July & 7B, 14B & Clause-level reward attribution\\
+FineStep \cite{finestep} & Findings EMNLP / Oct. & 4B, 8B, 30B & Step-level credit assignment\\
+FINER-SQL \cite{finer} & arXiv / May 5 & 0.5B, 1.5B, 3B & Memory and atomic-operation rewards\\
+DPC \cite{dpc} & arXiv / April 16 & 7B setting & Distinguishing DB; SQL/Python checks\\
+Progress-SQL \cite{progress} & arXiv / June 5 & 7B, 14B & Reference-guided progressive reward\\
+SERL-SQL \cite{serl} & arXiv / August 1 & 7B, 14B subset & Selective hindsight reweighting\\
+Counterfactual RL \cite{counter} & arXiv / Nov. 25 & 3.35B & Hidden database-copy reward checks\\
+\bottomrule
+\end{tabularx}
+\caption{Ten selected studies. Sizes describe eligible policy settings, not every model in each paper. Dates for the last five rows are first arXiv release dates.}
+\end{table}
+
+\subsection{Quality and uncertainty}
+Five works have directly verified ACL/EMNLP archival records. DPC's arXiv record reports ACL acceptance; FINER-SQL's author repository reports ICDE 2026, but this report cites the inspected arXiv version instead of assuming an identical proceedings version. The remaining recent works are used as provisional evidence. The November counterfactual study is especially preliminary. Its value here is a controlled challenge to a reward assumption, not proof of a mature production method.
+
+The 30B limit refers to \textbf{total policy parameters}. FineStep's Qwen3-30B-A3B therefore qualifies at the boundary; ``3B active'' is not ``3B total.'' SERL-SQL's 32B result is excluded from the eligible comparison. No missing cost or uncertainty measurement is interpreted as zero.
+
+\clearpage
+\section{Interaction and inference-time correction}
+\subsection{ReEx-SQL: putting execution inside reasoning}
+ReEx-SQL interleaves reasoning with SQL execution and uses execution-aware reinforcement learning \cite{reex}. Its Qwen2.5-Coder-7B policy can inspect intermediate observations instead of relying entirely on a one-pass reasoning trace. BIRD Dev EX is 63.4\% with greedy decoding and 65.3\% with voting over eight samples (Tables 1 and 3). These are different deployment budgets. The reported training uses eight A800 GPUs, showing why a compact policy does not imply inexpensive RL.
+
+The conceptual benefit is reducing the delay between a decision and observable evidence. However, the policy still needs to interpret the observation: an empty result can be correct, and plausible rows can conceal an incorrect condition. The comparison should therefore distinguish access to the executor from the quality of the learned revision rule.
+
+\subsection{SQL-Trail: allocating turns instead of always using them}
+SQL-Trail treats SQL generation as a multi-turn RL interaction with adaptive turn allocation and a correctness/efficiency reward \cite{trail}. The 7B model reports BIRD Dev 60.1\% greedy and 64.2\% majority-vote EX. Its controlled single-turn versus multi-turn comparison reports 56.3\% versus 59.3\% under majority voting (Table 2). Teacher-generated SFT trajectories precede RL, so its data-efficiency claim should not be read as a complete accounting of preparation cost.
+
+An adaptive budget is attractive when easy questions need no repair. Yet a stopping rule must avoid both premature acceptance and needless revision. The relevant deployment objective is the marginal probability of correcting the answer per additional tool call, including the chance that the next revision damages a correct query.
+
+\subsection{ReSQL: learning from past errors}
+ReSQL combines error-reasoning fine-tuning, retrieval, and iterative correction \cite{resql}. For Qwen 7B, its BIRD Dev table reports 44.39\% for the baseline and 53.78\% after the complete two-correction configuration (Table 2). This difference is an end-to-end system effect, not an isolated causal estimate for execution feedback. The method tests a broad range of small backbones rather than one model alone.
+
+Retrieval can make recurring errors easier to recognize, but a retrieved correction may fit the wording while referring to a different schema relationship. A useful follow-up should isolate retrieval, training, and iteration, then measure generalization to databases with unfamiliar naming and join patterns.
+
+\subsection{DPC: testing disagreements rather than counting votes}
+DPC is training-free candidate selection using a minimal distinguishing database and an independent Python/Pandas solution \cite{dpc}. With five candidates, its 7B setting reports BIRD EX 47.6\% versus self-consistency's 46.4\% (Table 2). Results for larger proprietary or open backbones are outside this report's small-policy comparison. Its test construction targets cases on which SQL candidates disagree.
+
+The verifier adds a second implementation of intent, which can reduce dependence on popularity among candidates. Nevertheless, SQL and Python may share the same misunderstanding of the question. The constructed database must preserve schema constraints and expose the disputed operation; otherwise agreement is weak evidence. Verification cost must also include database construction and the second program.
+
+\clearpage
+\section{Where should learning assign credit?}
+\subsection{EXPO-SQL: SQL clauses as the unit of supervision}
+EXPO-SQL assigns clause-level rewards using executor errors and incremental execution/result analysis \cite{expo}. Its 7B model reaches 71.3\% BIRD Dev EX with eight-sample self-consistency. Replacing clause-level rewards for both error cases with uniform query-level rewards gives 68.5\% (Table 4), a 2.8-point matched difference. The 14B model is also eligible, but the 7B ablation is more informative about the mechanism than a cross-paper leaderboard.
+
+Clause granularity matches recognizable SQL decisions such as WHERE and GROUP BY. The caveat is interaction: a wrong join can change an aggregate, and several clauses can jointly cause one discrepancy. A localized reward is an attribution rule, not automatically a proof that the indicated clause is the unique cause. Reference-result comparisons are also training supervision, not freely available production feedback.
+
+\subsection{FineStep: credit across tool-use steps}
+FineStep combines backward outcome discounting with smoothed process feedback for tool-integrated Text-to-SQL \cite{finestep}. It studies 4B, 8B, and a 30B-total MoE policy. In the 4B BIRD Dev comparison, FineStep versus GRPO is 67.01\% versus 65.78\% greedy, and 68.51\% versus 66.23\% Voting@8 (Table 3). The 2.28-point voting gain must not be substituted for the greedy gain. Its rule-based process signal avoids requiring a learned process-reward model.
+
+Step-level credit is useful when an early tool action enables a later correct answer. But a successful final trajectory need not make every earlier step necessary. Discounting can also favor short routes that happen to succeed. Evaluation should ask whether rewarded steps provide information that changes a subsequent decision, rather than merely appearing in successful traces.
+
+\subsection{FINER-SQL: denser feedback for very small policies}
+FINER-SQL combines verified reasoning memory with atomic-operation rewards in a GRPO-based pipeline \cite{finer}. Its 3B policy reports 67.73\% BIRD Dev EX; main accuracy experiments generate 30 candidates per question (Section V and Table II). Training draws on larger teachers and uses two 48GB A6000 GPUs. Thus a small deployed policy and a teacher-free, single-sample system are different claims.
+
+Dense partial credit may help when a small model rarely receives a positive binary reward. However, operation overlap can favor a structurally similar yet semantically wrong query. Memory can regularize reasoning while also narrowing diversity. The useful question is whether dense rewards preserve improvements on unseen schemas and under a smaller search budget.
+
+\subsection{Architectural comparison}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}p{26mm}YYY@{}}
+\toprule
+Credit unit & Main advantage & Main ambiguity & Necessary control\\
+\midrule
+Whole trajectory & Simple final objective & Which action mattered? & Same search budget\\
+Clause & Maps to SQL structure & Cross-clause interactions & Attribution ablation\\
+Tool-use step & Captures sequential work & Necessary or incidental step? & Redundant-call analysis\\
+Selected token & Fine update localization & Token importance vs causality & Mask/sign controls\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\clearpage
+\section{Privileged feedback and reward reliability}
+\subsection{Progress-SQL: improving a training trajectory}
+Progress-SQL uses an Oracle-guided Diagnostic Tree to represent clause structure and combines structural, lexical, progress, latency, and execution-status signals \cite{progress}. The 7B model reports 64.3\% BIRD Dev EX under Vote@8; its single-turn RL ablation gives 61.2\% (Table 3). Evaluation is single-turn without the oracle diagnostic feedback. The reference-guided training process should therefore be described as a route to a better policy, not a deployment-time error oracle.
+
+This separation is methodologically useful: a rich training signal may transfer to a simpler inference interface. Yet learning to repair with detailed diagnostics can create dependence on information missing at deployment. A convincing test must vary diagnostic richness during training while keeping the deployed observations and inference budget fixed.
+
+\subsection{SERL-SQL: selective hindsight rather than uniform distillation}
+SERL-SQL uses a training-only synchronized teacher to re-score student actions after execution, converting the likelihood gap into bounded, masked GRPO reweighting \cite{serl}. Its 7B row reports 75.55\% BIRD Dev EX, and 14B reports 89.92\% Spider Test EX. The 76.56\% BIRD headline belongs to 32B and is excluded. Reported reward-based trajectory selection also needs separate scrutiny from greedy inference (Tables 1 and 4).
+
+The paper defines training correctness using a gold-query execution comparison. A deployment interpretation of reward-max selection therefore requires an explicit answer-free scoring specification and independent validation. This report treats that interface as unresolved evidence, rather than assuming benchmark rewards are available in practice. Selective reweighting remains an interesting training mechanism even when a final selection claim needs a clearer oracle boundary.
+
+\subsection{Counterfactual execution: auditing the reward itself}
+The counterfactual study tests reward agreement on hidden database copies \cite{counter}. In a synthetic audit, strict multiset matching with blind copies reduces buggy-query full payment from 29.5\% to 16.8\%, and hack full payment from 54.1\% to 1.9\%, rejecting zero of 2,847 correct queries (Table 1). Its three-seed 3.35B training comparison does not establish a stable in-domain accuracy improvement. Better auditing is therefore not equivalent to better optimization.
+
+This very recent preprint offers counter-evidence to an easy narrative that a stronger verifier necessarily improves the final policy. Possible bottlenecks include few reward-disagreement examples, exploration, and training variance. The next experiment should identify which rollouts change reward and whether those changed examples influence learning.
+
+\subsection{Three different oracle boundaries}
+Training may use gold answers to create a reward. Evaluation may use gold answers to measure accuracy. Production selection must operate without them. These are legitimate but separate interfaces. An audit should list, for every signal, who computes it, what information it sees, and whether that information exists when a real user submits a new question.
+
+\clearpage
+\section{What numerical comparisons actually support}
+\begin{table}[h]
+\centering\small
+\begin{tabularx}{\textwidth}{@{}p{25mm}p{20mm}p{26mm}p{22mm}Y@{}}
+\toprule
+Study & Policy & Reported setting & Result & Interpretation\\
+\midrule
+ReEx-SQL & 7B & BIRD Dev; greedy / Vote@8 & 63.4 / 65.3 & Search adds 1.9 points\\
+SQL-Trail & 7B & BIRD; matched single / multi-turn & 56.3 / 59.3 & +3.0 points within study\\
+ReSQL & Qwen 7B & BIRD Dev; baseline / full system & 44.39 / 53.78 & Multiple changes combined\\
+EXPO-SQL & 7B & BIRD Dev; uniform / clause rewards & 68.5 / 71.3 & +2.8 points; same ablation\\
+FineStep & 4B & BIRD Dev Vote@8; GRPO / FineStep & 66.23 / 68.51 & +2.28 points; matched decode\\
+FINER-SQL & 3B & BIRD Dev; 30 candidates & 67.73 & Budget differs from Vote@8\\
+DPC & 7B & BIRD; SC / DPC; pool of 5 & 46.4 / 47.6 & +1.2 points in selection\\
+Progress-SQL & 7B & BIRD Dev Vote@8; single / full & 61.2 / 64.3 & +3.1 points in ablation\\
+SERL-SQL & 7B & BIRD Dev; reported selection & 75.55 & Selection oracle needs scrutiny\\
+Counterfactual & 3.35B & Synthetic audit; buggy full pay & 29.5 / 16.8 & Reward audit, not EX gain\\
+\bottomrule
+\end{tabularx}
+\caption{A protocol-aware evidence table. Values are percentages; differences are percentage points. See the corresponding sources in Sections 4--6. This is not a shared leaderboard.}
+\end{table}
+
+\subsection{Why matched evidence is more persuasive}
+A matched ablation asks a narrower causal question than a headline comparison. Removing clause rewards while holding the rest of a pipeline fixed is closer to testing the reward mechanism than comparing two systems with different teachers, datasets, prompts, and candidate counts. Even a matched comparison is conditional on that backbone and training regime; it does not identify a universal gain.
+
+The same benchmark name is insufficient to establish comparability. Prompting can include different schema subsets, cell values, and evidence. Inference can include retries, candidate filtering, or database exploration. Reproduced baselines may differ from the original system. The source paper's table and evaluation description take priority over a number quoted in a later paper's related-work table.
+
+\subsection{Uncertainty and negative evidence}
+Single-seed results do not quantify training variance. Confidence intervals over test questions describe a different uncertainty from intervals across independently trained seeds. Small improvements should be assessed with paired question-level comparisons, while seed-level variability should be reported separately. A large candidate budget also increases compute even when its additional accuracy is small.
+
+\clearpage
+\section{An executable example of accidental correctness}
+\subsection{Boundary conditions expose a wrong predicate}
+Consider the question: ``How many customers have a score of at least 80?'' The intended predicate is \texttt{score >= 80}. A generated query using \texttt{score > 80} is wrong, but a particular database may hide the mistake.
+\begin{lstlisting}[language=SQL]
+-- Reference query
+SELECT COUNT(*) FROM customers WHERE score >= 80;
+-- Executable but semantically wrong query
+SELECT COUNT(*) FROM customers WHERE score > 80;
+\end{lstlisting}
+The accompanying Python script executes both queries on two SQLite databases. The second database preserves the same table schema and adds a valid boundary row; no language-model output or benchmark accuracy is simulated.
+
+\begin{center}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Database scores & Reference result & Wrong-query result & Agreement\\
+\midrule
+60, 90 & 1 & 1 & Yes\\
+60, 80, 90 & 2 & 1 & No\\
+\bottomrule
+\end{tabular}
+\end{center}
+Both queries execute successfully on both instances. The first instance cannot distinguish them; the second can. This is a finite constructive example, not a measured estimate of how often such errors occur in real databases.
+
+\subsection{What additional tests should target}
+Useful tests vary semantic boundaries: equality thresholds, duplicate rows, one-to-many relationships, NULL values, empty groups, and ties. Randomly adding rows may fail to exercise the disputed condition. A test generator should therefore seek disagreement while respecting keys, foreign keys, types, and any domain constraints known to the application.
+
+A multi-instance verifier can be written as
+\begin{equation}
+R_{\mathrm{suite}}(y)=\frac{1}{K+1}\sum_{k=0}^{K}
+\mathbf{1}[E_{D_k}(y)\equiv E_{D_k}(y^*)].
+\end{equation}
+This mean reward gives partial credit; an all-instances-pass rule is stricter. Neither proves universal equivalence from finitely many tests. Both still depend on the reference being correct, and a generated database may violate an unstated business rule.
+
+\subsection{Verification and correction are different capabilities}
+Finding a counterexample identifies a failed condition; it does not automatically produce the right SQL. A useful correction loop translates the counterexample into an actionable explanation, proposes a local edit, and rechecks previously passing tests to avoid regression. The deployed system additionally needs an answer-free source of expected behavior, such as validated business rules or a trustworthy independent implementation. Gold-query access makes research evaluation easier but changes the deployment problem.
+
+\clearpage
+\section{Cross-paper synthesis under the 30B constraint}
+\subsection{Information quality matters more than feedback volume}
+The ten studies expose a common trade-off: denser feedback is easier to optimize, but it can be a less faithful proxy for the intended answer. Structural overlap, a teacher's likelihood, and agreement among candidates are evidence about correctness rather than definitions of correctness. A sound design should use these signals to guide search while retaining an independent final correctness check wherever possible.
+
+Feedback should also describe uncertainty. ``No rows returned'' should not be translated automatically into ``wrong WHERE clause.'' A runtime error gives stronger evidence about executability than a nonempty result gives about semantic correctness. A policy should distinguish an observed failure from an uncertain diagnosis and avoid rewriting already supported parts of the query without a reason.
+
+\subsection{Model architecture is a component, not the whole system}
+Most eligible settings adapt decoder language models, often code-oriented Qwen variants, rather than replacing SQL execution with a learned simulator. Their principal architectural changes are in the surrounding learning and verification loop: a retrieval memory, tool-use policy, clause mapper, teacher re-scorer, or candidate selector. Architecture comparisons should therefore include these components and their inputs, not only the decoder's parameter count.
+
+For a dense model with $N$ parameters, ideal weight storage is approximately $2N$ bytes in BF16 and $N/2$ bytes at four bits. This gives 14GB/3.5GB for 7B and 60GB/15GB for 30B, using decimal units. These are \emph{weight-only lower-order estimates}, not measured total VRAM. Quantization metadata, activations, KV cache, optimizer states, and parallel candidates add memory. MoE active parameters affect computation but do not eliminate storage for inactive experts.
+
+\subsection{A practical system choice}
+For a course-scale prototype, inference-time correction around a 3B--7B policy is a more directly testable starting point than full multi-GPU RL. A read-only executor can provide real operational feedback, while a fixed small candidate pool makes costs visible. Richer learned rewards become worthwhile only after establishing that the feedback solves errors the base system actually makes.
+
+For a training study, the central control is a common initialization, dataset, prompt, executor, and inference budget. Compare binary outcome reward with one additional feedback mechanism at a time. Otherwise an improvement can be caused by better data or larger search rather than the proposed credit-assignment method.
+
+\subsection{Cost accounting should follow the entire lifecycle}
+Report preparation cost, teacher calls, student training compute, executor calls, and inference tokens separately. A reusable trained policy may amortize expensive training over many queries; a training-free verifier may be economical for a small workload but costly per request. Neither approach is always cheaper. The useful comparison is total cost at a stated workload and target reliability, including failed queries and retries.
+
+\clearpage
+\section{A proposed controlled evaluation}
+This section proposes future experiments; it does not claim that they have already been run. The aim is to test whether a feedback mechanism improves semantic reliability under a fixed resource budget.
+
+\subsection{Experimental matrix}
+Use openly available 3B and 7B code-oriented policies. Freeze a common schema/value prompt and keep training and evaluation databases disjoint. Reserve a validation set for stopping rules and select hyperparameters before the final test. When available, use held-out benchmark test suites as well as original-instance evaluation.
+
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}p{29mm}YY@{}}
+\toprule
+Condition & Feedback / selection & Question tested\\
+\midrule
+One-shot baseline & No correction & Initial capability\\
+Validity-only repair & Parser/runtime errors & Are gains mostly syntax repair?\\
+Result-aware repair & Errors and bounded result previews & Does observing rows help meaning?\\
+Fixed-pool voting & Same total candidate budget & Is interaction better than search breadth?\\
+Counterexample verifier & Constraint-preserving test cases & Does extra verification expose lucky passes?\\
+Matched reward study & Binary vs one dense component & Does the training signal add value?\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Hold total generated tokens and executor calls fixed in the primary comparison; also show an accuracy--cost curve instead of selecting a convenient budget for each method. A secondary study can compare eight candidates with a bounded multi-turn allocation using the same overall resource allowance. Limits must include verifier generation and failed executions.
+
+\subsection{Measurements and analysis}
+Report execution validity, instance EX, test-suite agreement, fix rate, regression rate, and selector accuracy conditional on at least one correct candidate. Add median and tail latency, generated tokens, tool calls, timeout rate, and training/preparation cost. Break errors down into joins, aggregation, filtering, value grounding, and output structure, using manually checked labels for a subset.
+
+Use at least three training seeds where training is involved. Bootstrap paired question-level accuracy differences and report per-seed results separately. Audit overlap of feedback signals: if two rewards agree on almost every rollout, a small final difference should not be presented as proof that one reward teaches a fundamentally different behavior.
+
+\subsection{Deployment and reproducibility controls}
+Run SQL with read-only database access, a statement allowlist, resource/time limits, and bounded result previews. Run generated Python in an isolated process with a restricted interface. Record model revision, prompts, source data splits, comparator implementation, decoding parameters, and all retry/stopping rules. Hide gold SQL from every deployment-time component. Preserve traces for error analysis while avoiding disclosure of sensitive database content.
+
+\clearpage
+\section{Limitations, future directions, and conclusion}
+\subsection{Limits of this survey}
+The corpus is deliberately narrow and contains both archival publications and preprints. Publication status is not a quality score, but recent unreviewed findings carry additional uncertainty. Formal-publication eligibility also differs from a requirement that every work's \emph{first public appearance} be in 2026; this report makes its date interpretation explicit. The evidence cutoff excludes later revisions.
+
+No common implementation was used to retrain the ten methods. The numerical comparison therefore supports conditional, within-study interpretations rather than a pooled effect size. Source-code availability alone does not establish reproducibility, and this report does not claim that all linked repositories reproduce their reported tables. Unreported training variance, hidden test details, and differing prompts remain limitations. The SQLite example demonstrates a logical possibility, not the prevalence of accidental correctness.
+
+\subsection{Promising directions}
+\textbf{Counterexample-guided correction.} Connect a failed test to a specific semantic obligation, such as preserving duplicates or handling boundary values. Compare local edits with complete regeneration, including regression checks on previously passing cases. The goal is more informative repairs rather than merely more iterations.
+
+\textbf{Answer-free deployment verification.} Make explicit which signals survive without a gold query. Candidate disagreement, validated invariants, and independently implemented operations can provide evidence, but their correlated errors need measurement. A system should be able to abstain when available tests cannot distinguish candidates.
+
+\textbf{Cost-aware stopping.} Learn or calibrate a stopping rule using the expected value of another execution, including the risk of regression. Evaluate it against a fixed-turn baseline at equal average cost and compare tail costs so that difficult questions do not consume an unbounded budget.
+
+\textbf{Reward audits before optimization.} Measure false acceptance of semantic mutants, rejection of correct queries, and the frequency with which an alternative reward changes the training signal. This can reveal whether a theoretically stronger verifier has enough practical leverage to change learning.
+
+\textbf{Small-policy system reporting.} Separate total/active policy parameters, auxiliary models, teacher dependencies, quantization, and search budget. Such reporting would make the 30B preference useful for real implementation rather than a superficial model label.
+
+\subsection{Conclusion}
+Execution feedback is valuable because it grounds SQL generation in observable behavior. The reviewed methods improve interaction, localize learning signals, or strengthen candidate verification, but these mechanisms address different bottlenecks. A correct conclusion cannot be obtained by sorting their headline execution accuracies.
+
+The most defensible synthesis is that \textbf{reliable correction requires reliable feedback, a clear oracle boundary, and budget-matched evaluation}. Successful execution is only the first check. Agreement on one database can be accidental, more turns can introduce regressions, and more informative rewards may still fail to improve training. Under a 30B policy limit, the most useful future work is to demonstrate semantic robustness per unit of computation, while clearly separating observed evidence from proposed capabilities.
+
+\clearpage
+\begin{thebibliography}{10}
+\setlength{\itemsep}{8pt}
+\bibitem{reex} Y. Dai et al. \emph{ReEx-SQL: Reasoning with Execution-Aware Reinforcement Learning for Text-to-SQL}. ACL 2026, pp. 824--847, July 2026. \url{https://aclanthology.org/2026.acl-long.35/}.
+\bibitem{trail} H. Hua et al. \emph{SQL-Trail: Multi-Turn Reinforcement Learning with Interleaved Feedback for Text-to-SQL}. ACL 2026, pp. 36224--36246, July 2026. \url{https://aclanthology.org/2026.acl-long.1677/}.
+\bibitem{resql} M. Park et al. \emph{ReSQL: Self-Improving Framework for Reasoning-Aware Text-to-SQL Dataset Generation}. Findings of ACL 2026, pp. 33582--33602, July 2026. \url{https://aclanthology.org/2026.findings-acl.1677/}.
+\bibitem{expo} J. Lee et al. \emph{EXPO-SQL: Execution-based Clause-level Policy Optimization for Text-to-SQL}. Findings of ACL 2026, pp. 22000--22019, July 2026. \url{https://aclanthology.org/2026.findings-acl.1107/}.
+\bibitem{finestep} Y. Dai et al. \emph{Every Step Counts: Step-Level Credit Assignment for Tool-Integrated Text-to-SQL}. Findings of EMNLP 2026, pp. 23876--23894, October 2026. \url{https://aclanthology.org/2026.findings-emnlp.1128/}.
+\bibitem{finer} T. D. Hoang et al. \emph{FINER-SQL: Boosting Small Language Models for Text-to-SQL}. arXiv:2605.03465v1, May 5, 2026. Preprint version inspected. \url{https://arxiv.org/abs/2605.03465v1}.
+\bibitem{dpc} B. Li, O. O. K. Hei, Y. Yu, and Y. Luo. \emph{DPC: Training-Free Text-to-SQL Candidate Selection via Dual-Paradigm Consistency}. arXiv:2604.15163, first submitted April 16, revised April 17, 2026. arXiv metadata reports ACL 2026 acceptance. \url{https://arxiv.org/abs/2604.15163}.
+\bibitem{progress} S. Zhang et al. \emph{Progress-SQL: Improving Reinforcement Learning for Text-to-SQL via Progressive Rewards}. arXiv:2606.06825v1, June 5, 2026. Preprint. \url{https://arxiv.org/abs/2606.06825v1}.
+\bibitem{serl} T. Liu et al. \emph{SERL-SQL: Selective Hindsight Distillation for Text-to-SQL Reinforcement Agentic Learning}. arXiv:2608.00485v4, October 8, 2026; first submitted August 1, 2026. Under review according to arXiv metadata. \url{https://arxiv.org/abs/2608.00485v4}.
+\bibitem{counter} S. Rai, R. K. Singh, and A. Aggarwal. \emph{Single-Database Rewards Are Hackable: Counterfactual Execution for Trustworthy Text-to-SQL RL}. arXiv:2611.34363, November 25, 2026. Recent preprint. \url{https://arxiv.org/abs/2611.34363}.
+\end{thebibliography}
+\end{document}
